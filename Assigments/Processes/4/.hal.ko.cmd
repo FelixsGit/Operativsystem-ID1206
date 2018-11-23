@@ -1,0 +1,1 @@
+cmd_/home/felix/Desktop/Operativsystem/Assigments/Processes/4/hal.ko := ld -r -m elf_x86_64 -z max-page-size=0x200000 -T ./scripts/module-common.lds --build-id  -o /home/felix/Desktop/Operativsystem/Assigments/Processes/4/hal.ko /home/felix/Desktop/Operativsystem/Assigments/Processes/4/hal.o /home/felix/Desktop/Operativsystem/Assigments/Processes/4/hal.mod.o ;  true
