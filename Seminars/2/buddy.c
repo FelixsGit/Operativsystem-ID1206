@@ -8,29 +8,73 @@
 #define LEVELS 8 
 #define PAGE 4096
 
-enum flag {Free, Taken};
+enum flag {Free, Taken, Split};
 
-struct head* freeLists[LEVELS] = {NULL};
+struct head* memory;
 
 //This is the header of each block
 struct head{
   enum flag status;
   short int level;
-  struct head *next;
-  struct head *prev;
+  int size;
+  struct head *leftChildBlock;
+  struct head *rightChildBlock;
 };
 
-//This function creates a new block
-struct head* new() {
-  struct head *new = mmap(NULL, PAGE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if(new == MAP_FAILED) {
-    printf("mmap failed: error %d\n", errno);
-    return NULL;
+//This function adds the entered block to the head of the linkedList at the entered level
+/*
+void push(struct head* blockToAdd, short int level){
+  if(freeLists[level] == NULL){
+    freeLists[level] = blockToAdd;
+    blockToAdd->level = level;
+    blockToAdd->prev = NULL;
+    blockToAdd->next = NULL;
+  }else{
+    blockToAdd->next = freeLists[level];
+    blockToAdd->level = level;
+    blockToAdd->prev = NULL;
+    blockToAdd->next->prev = blockToAdd;
+    freeLists[level] = blockToAdd;
   }
-  assert(((long int)new & 0xfff) == 0);  // 12 last bits should be zero 
-  new->status = Free;
-  new->level = LEVELS -1;
-  return new;
+}
+
+//This function removes the first block in the linkedList at the enterd level
+void delete(short int level){
+  printf("Deleting the first block at level %d\n", level);
+  if(freeLists[level] == NULL){
+    return;
+  }else if(freeLists[level]->next != NULL){
+    freeLists[level] = freeLists[level]->next;
+    freeLists[level]->prev = NULL;
+  }else{
+    freeLists[level] = NULL;
+  }
+}
+
+*/
+//This function creates a new block
+void newMemory() {
+  memory = mmap(NULL, PAGE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if(memory == MAP_FAILED) {
+    printf("mmap failed: error %d\n", errno);
+  }else{
+    assert(((long int)memory & 0xfff) == 0);  // 12 last bits should be zero 
+    memory->status = Free;
+    memory->level = LEVELS -1;
+    memory->size = PAGE;
+  }
+}
+struct head* newBlock(int size, short int level) {
+   struct head* newBlock = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if(newBlock == MAP_FAILED) {
+    printf("mmap failed: error %d\n", errno);
+  }else{
+    assert(((long int)newBlock & 0xfff) == 0);  // 12 last bits should be zero 
+    newBlock->status = Free;
+    newBlock->level = level;
+    newBlock->size = size;
+    return newBlock;
+  }
 }
 
 //This function find the buddy of the entered block 
@@ -65,7 +109,7 @@ struct head *magic(void* memory){
 //This function find the level of a block given the entered size
 int level(int size){
   int req = size + sizeof(struct  head);
-  printf("required size of block: = %d byte\n", req);
+  //printf("required size of block: = %d byte aka level", req);
   if(req > 4096){
     return 8;
   }
@@ -96,51 +140,70 @@ int level(int size){
   else{
     return NULL;
   }
-
-  /*
-  printf("req = %lu\n", req);
-  int i = 0;
-  req = req >> MIN; 
-  printf("req = %lu\n", req);
-  while(req > 0){
-    i++;
-    req = req >> 1;
-  }
-  return i;
-  */
 }
 
 //This function splits a block and returns the new block
-struct head *split(struct head *block) {
-  int index = block->level - 1;
+void split(struct head* parentBlock) {
+  int index = parentBlock->level - 1;
   int mask =  0x1 << (index + MIN);
-  struct head* newBlock = (struct head*)((long int) block | mask);
-  newBlock->level = index;
-  printf("a block was moved down to level %d\n",newBlock->level );
-  return newBlock;
+  struct head* newLeftBlock = newBlock(parentBlock->size/2, index);
+  struct head* newRightBlock = newBlock(parentBlock->size/2, index);
+  parentBlock->status = Split;
+  newRightBlock->status = Free;
+  newLeftBlock->status = Free;
+
+  newRightBlock->level = index;
+  newLeftBlock->level = index;
+
+  parentBlock->rightChildBlock = newRightBlock;
+  parentBlock->leftChildBlock = newLeftBlock;
 }
 
-struct head* find(int index){
-  printf("Trying to find a free block at level %d, aka a block with size %d byte\n", index, 1*64);
-  for(int i = index; i < LEVELS; i++){
-    if(freeLists[i] != NULL){
-      int timesToSplit = i - index;
-      if(timesToSplit == 0){
-        printf("Block %p was found at level: %d\n",freeLists[i], i);
-        freeLists[i]->status = Taken;
-        return freeLists[i];
-      }else{
-        printf("level %d had free block with address: %p\n",i, freeLists[i]);
-        printf("Spliting...\n");
-        freeLists[i - 1] = split(freeLists[i]);
-        find(index);
-        break;
-      }
+//This function returns a block of the size declared by the entered index
+struct head* find(struct head* currentBlock, int index){
+  //printf("Arrived at block %p with level = %d, status = %d size = %d\n",currentBlock, currentBlock->level, currentBlock->status, currentBlock->size);
+  if(currentBlock->level == index){
+    if(currentBlock->status == Free){
+      //printf("BLOCK TAKEN\n");
+      currentBlock->status = Taken;
+      return currentBlock;
+    }else if(currentBlock->level < 7){
+      //printf("going back\n");
+      return NULL;
     }
-    printf("level %d was empty\n", i);
+    else{
+      if(currentBlock->level == 7){
+        //printf("MEMORY FULL NO MEMORY AVAILABLE\n");
+      }
+      return NULL;
+    }
+  }else{
+    if(currentBlock->status == Split){
+      //printf("going left...\n");
+      if(find(currentBlock->leftChildBlock, index) == NULL){
+        //printf("Arrived at block %p with level = %d, status = %d size = %d\n",currentBlock, currentBlock->level, currentBlock->status, currentBlock->size);
+        //printf("going right...\n");
+        if(find(currentBlock->rightChildBlock, index) == NULL){
+          if(currentBlock->level == 7){
+            //printf("MEMORY FULL NO MEMORY AVAILABLE\n");
+          }
+          return NULL;
+        }
+      }
+    }else if(currentBlock->status == Taken){
+      if(currentBlock->level == 7){
+        //printf("MEMORY FULL NO MEMORY AVAILABLE\n");
+      }
+      return NULL;
+    }else if(currentBlock->status == Free){
+      //printf("spliting block\n");
+      split(currentBlock);
+      find(currentBlock, index);
+    }
   }
 }
 
+//This function is used to allocate new memory of the entered size
 void *balloc(size_t size){
   if(size == 0){
     return NULL;
@@ -149,33 +212,106 @@ void *balloc(size_t size){
     if(index > 7){
       return NULL;
     }
-    struct head* taken = find(index);
+    //printf(" %d\n", index);
+    struct head* taken = find(memory, index);
+    if(taken == NULL){
+      return NULL;
+    }
     return hide(taken); 
   }
 }
 
+int _print_t(struct head* tree, int is_left, int offset, int depth, char s[20][255])
+{
+    char b[20];
+    int width = 5;
+
+    if (!tree) return 0;
+
+    sprintf(b, "(%03d)", tree->status);
+
+    int left  = _print_t(tree->leftChildBlock,  1, offset,                depth + 1, s);
+    int right = _print_t(tree->rightChildBlock, 0, offset + left + width, depth + 1, s);
+
+#ifdef COMPACT
+    for (int i = 0; i < width; i++)
+        s[depth][offset + left + i] = b[i];
+
+    if (depth && is_left) {
+
+        for (int i = 0; i < width + right; i++)
+            s[depth - 1][offset + left + width/2 + i] = '-';
+
+        s[depth - 1][offset + left + width/2] = '.';
+
+    } else if (depth && !is_left) {
+
+        for (int i = 0; i < left + width; i++)
+            s[depth - 1][offset - width/2 + i] = '-';
+
+        s[depth - 1][offset + left + width/2] = '.';
+    }
+#else
+    for (int i = 0; i < width; i++)
+        s[2 * depth][offset + left + i] = b[i];
+
+    if (depth && is_left) {
+
+        for (int i = 0; i < width + right; i++)
+            s[2 * depth - 1][offset + left + width/2 + i] = '-';
+
+        s[2 * depth - 1][offset + left + width/2] = '+';
+        s[2 * depth - 1][offset + left + width + right + width/2] = '+';
+
+    } else if (depth && !is_left) {
+
+        for (int i = 0; i < left + width; i++)
+            s[2 * depth - 1][offset - width/2 + i] = '-';
+
+        s[2 * depth - 1][offset + left + width/2] = '+';
+        s[2 * depth - 1][offset - width/2 - 1] = '+';
+    }
+#endif
+
+    return left + width + right;
+}
+
+void print_t(struct head* tree)
+{
+    char s[20][255];
+    for (int i = 0; i < 20; i++)
+        sprintf(s[i], "%80s", " ");
+
+    _print_t(tree, 0, 0, 0, s);
+
+    for (int i = 0; i < 20; i++)
+        printf("%s\n", s[i]);
+}
+
 //This function is used to test the different functionallity above
 void test(){
-  struct head* startingMemory = new();
-  freeLists[LEVELS - 1] = startingMemory;
-  struct head* givenBlock = balloc(12);
-  if(givenBlock == NULL){
-    printf("Maximum balloc value exceded, you have to request less memory\n");
-  }else{
-    printf("User received block %p (header removed)\n",givenBlock);
+  newMemory();
+
+  struct head* givenBlockOne = balloc(768);
+  if(givenBlockOne == NULL){
+   printf("Memory could not be allocated\n\n");    
+  }else{      
+    printf("User received block %p (header removed)\n\n",givenBlockOne);
   }
-  /*
-  struct head *first = new();
-  struct head *second = new();
-  struct head *third = new();
-  first->next = second;
-  second->prev = first; 
-  second->next = third;
-  third->prev = second;
 
-  printf("1st block = %p, with (level = %d, prev = %p, next = %p)\n",first, first->level, first->prev, first->next);
-  printf("2st block = %p, with (level = %d, prev = %p, next = %p)\n",second, second->level, second->prev, second->next);
-  printf("3st block = %p, with (level = %d, prev = %p, next = %p)\n",third, third->level, third->prev, third->next);
-  */
+  struct head* givenBlockTwo = balloc(1200);
+  if(givenBlockTwo == NULL){
+   printf("Memory could not be allocated\n\n");    
+  }else{      
+    printf("User received block %p (header removed)\n\n",givenBlockTwo);
+  }
 
+  struct head* givenBlockThree = balloc(32);
+  if(givenBlockThree == NULL){
+   printf("Memory could not be allocated\n\n");    
+  }else{      
+    printf("User received block %p (header removed)\n\n",givenBlockThree);
+  }
+  
+  print_t(memory);
 }
