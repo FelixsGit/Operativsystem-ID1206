@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <time.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -10,11 +11,8 @@
 #define LEVELS 8   
 #define PAGE 4096
 
-enum flag {Free, Taken};
-
 
 struct head {
-  enum flag status;
   short int level;
   struct head *next;
   struct head *prev;  
@@ -54,13 +52,11 @@ void printflists(){
 	for(int i = LEVELS - 1; i > - 1; i--){
 		int z = 0;
 		struct head* test = flists[i];
-		if(test == NULL){
-			
-		}else{
+		if(test != NULL){
 			z = 1;
-		 	while(test->next != NULL){
-				z++;
-				test = test->next;
+	 		while(test->next != NULL){
+			z++;
+			test = test->next;
 			}
 		}
 		printf("Free blocks at level %d = %d\n",i, z);
@@ -76,7 +72,7 @@ struct head *new() {
     return NULL;
   }
   assert(((long int)new & 0xfff) == 0);  // 12 last bits should be zero 
-  new->status = Free;
+  //new->status = Free;
   new->level = LEVELS -1;
   return new;
 }
@@ -141,6 +137,7 @@ struct head *find(int index, short int level) {
  	}else{
  		struct head* blockToGive = flists[index];
  		removeFromflists(index);
+ 		blockToGive->level = index;
  		return blockToGive;
  	}
 }
@@ -159,13 +156,34 @@ void *balloc(size_t size) {
 }
 
 
-void insert(struct head *block) {
-  // for you to implement
+void insert(struct head* block) {
+  printf("looking to insert the block %p at level %d\n", block, block->level);
+  appendToflists(block);
+  if(block->level > 6){
+  	printf("reached root, no mory buddies available, returning...\n");
+  	return;
+  }else{
+  	printf("free block is now inserted, looking for a buddy...\n");
+  	printflists();
+  	if(flists[block->level]->next != NULL){
+  		struct head* currentBuddy =  buddy(block);
+  		printf("Buddy found at level %d with address %p, trying to coalesce\n",currentBuddy->level, currentBuddy);
+  		struct head* coalescedBlock = primary(block);
+  		coalescedBlock->level = block->level + 1;
+  		removeFromflists(block->level);
+  		removeFromflists(block->level);
+  		printf("Coalescense complete, block with address %p added to level %d in the flists\n",coalescedBlock, coalescedBlock->level);
+  		insert(coalescedBlock);
+  		return;
+
+  	}
+  	printf("no buddy found, returning...\n");
+  	return;
+  }
   return;
 }
 
 void bfree(void *memory) {
-
   if(memory != NULL) {
     struct head *block = magic(memory);
     insert(block);
@@ -177,22 +195,45 @@ void bfree(void *memory) {
 // Test sequences
 void test() {
 	appendToflists(new());
-
-	struct head* givenBlock = balloc(2);
+	int numberOfBallocs = 16;
+	srand(time(NULL));
+	/*
+	for(int i = 0; i < numberOfBallocs; i++){
+		int r = (rand() % (PAGE)/10) +1;
+		printf("Trying to request memory of size %d bytes\n", r); 
+		struct head* givenBlock = balloc(r);
+		if(givenBlock == NULL){
+			printf("Error! The requested memory (%d)cant be given, true a lower amount!\n", r);
+		}else{
+			printf("Program was given block %p\n",givenBlock);
+		}
+	}
+	*/
+	//int r = (rand() % (PAGE)/10) +1;
+	int r = 870;
+	printf("Trying to request memory of size %d bytes\n", r); 
+	struct head* givenBlock = balloc(r);
 	if(givenBlock == NULL){
-		printf("Error! The requested memory cant be given, true a lower amount!\n");
+		printf("Error! The requested memory (%d)cant be given, true a lower amount!\n", r);
 	}else{
 		printf("Program was given block %p\n",givenBlock);
-		printflists();
 	}
-
-	printf("\n");
-
-	struct head* givenBlockTwo = balloc(300);
+	printf("\n\n");
+	r = 32;
+	printf("Trying to request memory of size %d bytes\n", r); 
+	struct head* givenBlockTwo = balloc(r);
 	if(givenBlockTwo == NULL){
-		printf("Error! The requested memory cant be given, true a lower amount!\n");
+		printf("Error! The requested memory (%d)cant be given, true a lower amount!\n", r);
 	}else{
 		printf("Program was given block %p\n",givenBlockTwo);
-		printflists();
 	}
+	printf("\n");
+	printflists();
+	printf("\n");
+	printf("Trying to free the block %p\n",givenBlock);
+	bfree(givenBlock);
+	givenBlock = NULL;
+	printf("Trying to free the block %p\n",givenBlockTwo);
+	bfree(givenBlockTwo);
+	givenBlockTwo = NULL;
 }
