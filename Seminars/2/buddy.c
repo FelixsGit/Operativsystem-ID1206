@@ -49,6 +49,7 @@ void removeFromflists(int level){
 
 //This function prints the number of free block on each level in the flists structure
 void printflists(){
+	printf("--flists current values--\n");
 	for(int i = LEVELS - 1; i > - 1; i--){
 		int z = 0;
 		struct head* test = flists[i];
@@ -157,21 +158,26 @@ void *balloc(size_t size) {
 
 
 void insert(struct head* block) {
-  printf("looking to insert the block %p at level %d\n", block, block->level);
+  printf("looking to insert the block %p at level %d into the flists\n", block, block->level);
   appendToflists(block);
   if(block->level > 6){
   	printf("reached root, no mory buddies available, returning...\n");
+  	printf("\n");
+  	printflists();
+  	printf("\n");
   	return;
   }else{
   	printf("free block is now inserted, looking for a buddy...\n");
+  	printf("\n");
   	printflists();
+  	printf("\n");
   	if(flists[block->level]->next != NULL){
   		struct head* currentBuddy =  buddy(block);
   		printf("Buddy found at level %d with address %p, trying to coalesce\n",currentBuddy->level, currentBuddy);
   		struct head* coalescedBlock = primary(block);
   		coalescedBlock->level = block->level + 1;
-  		removeFromflists(block->level);
-  		removeFromflists(block->level);
+  		removeFromflists(coalescedBlock->level - 1);
+  		removeFromflists(coalescedBlock->level - 1);
   		printf("Coalescense complete, block with address %p added to level %d in the flists\n",coalescedBlock, coalescedBlock->level);
   		insert(coalescedBlock);
   		return;
@@ -187,8 +193,9 @@ void bfree(void *memory) {
   if(memory != NULL) {
     struct head *block = magic(memory);
     insert(block);
+  }else{
+  	printf("cant free an empty block, returning...\n");
   }
-  return;
 }
 
 
@@ -214,26 +221,26 @@ void test() {
 	printf("Trying to request memory of size %d bytes\n", r); 
 	struct head* givenBlock = balloc(r);
 	if(givenBlock == NULL){
-		printf("Error! The requested memory (%d)cant be given, true a lower amount!\n", r);
+		printf("Error! The requested memory(%d bytes) cant be given, try a lower amount!\n", r);
 	}else{
 		printf("Program was given block %p\n",givenBlock);
 	}
-	printf("\n\n");
-	r = 32;
+	printf("\n");
+	r = 1;
 	printf("Trying to request memory of size %d bytes\n", r); 
 	struct head* givenBlockTwo = balloc(r);
 	if(givenBlockTwo == NULL){
-		printf("Error! The requested memory (%d)cant be given, true a lower amount!\n", r);
+		printf("Error! The requested memory (%d bytes) cant be given, try a lower amount!\n", r);
 	}else{
 		printf("Program was given block %p\n",givenBlockTwo);
 	}
 	printf("\n");
 	printflists();
 	printf("\n");
-	printf("Trying to free the block %p\n",givenBlock);
-	bfree(givenBlock);
-	givenBlock = NULL;
 	printf("Trying to free the block %p\n",givenBlockTwo);
 	bfree(givenBlockTwo);
 	givenBlockTwo = NULL;
+	printf("Trying to free the block %p\n",givenBlock);
+	bfree(givenBlock);
+	givenBlock = NULL;
 }
