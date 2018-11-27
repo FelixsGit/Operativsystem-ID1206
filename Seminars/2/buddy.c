@@ -12,7 +12,10 @@
 #define LEVELS 8   
 #define PAGE 4096
 
+enum flag {Free, Taken};
+
 struct head {
+  enum flag status;
   short int level;
   struct head *next;
   struct head *prev;  
@@ -22,9 +25,11 @@ struct head {
 /* The free lists */
 struct head *flists[LEVELS] = {NULL};
 int pagesAllocated = 0;
+int numberOfFreePages = 0;
 
 //This function appends a block to the flists structure
 void appendToflists(struct head* blockToAppend){
+  blockToAppend->status = Free;
 	if(flists[blockToAppend->level] == NULL){
 		blockToAppend->prev = NULL;
 		blockToAppend->next = NULL;
@@ -57,8 +62,8 @@ void printflists(){
 		if(test != NULL){
 			z = 1;
 	 		while(test->next != NULL){
-			z++;
-			test = test->next;
+			   z++;
+			   test = test->next;
 			}
 		}
 		printf("Free blocks at level %d = %d\n",i, z);
@@ -75,6 +80,8 @@ struct head *new() {
   }
   assert(((long int)new & 0xfff) == 0);  // 12 last bits should be zero 
   new->level = LEVELS -1;
+  new->status = Free;
+  pagesAllocated++;
   return new;
 }
 
@@ -84,18 +91,14 @@ struct head *buddy(struct head* block) {
   return (struct head*)((long int)block ^ mask);
 }
 
-struct head* merge(struct head* block, struct head* sibling){
-  struct head *primary;
-  if(sibling < block){
-    primary = sibling;
-  }else{
-    primary = block;
-  }
-  primary->level = primary->level + 1;
-  return primary;
+struct head *primary(struct head* block) {
+  int index = block->level;
+  long int mask =  0xffffffffffffffff << (1 + index + MIN);
+  return (struct head*)((long int)block & mask);
 }
 
 struct head *split(struct head *block) {
+  block->status = Taken;
   int index = block->level - 1;
   int mask =  0x1 << (index + MIN);
   struct head* rightNewBlock = (struct head *)((long int)block | mask);
@@ -129,23 +132,19 @@ int level(int req) {
 
 
 struct head *find(int index, short int level) {
- 	//printf("looking for a block at level %d\n",index);
  	if(flists[index] == NULL){
  		if(index > 6){
- 			//printf("Page full!, retreving new page\n");
- 			pagesAllocated++;
  			appendToflists(new());
  			find(index, level);
  		}else{
- 			//printf("no free block found at level %d, going up...\n", index);
  			find(index+ 1, level);
  		}
  	}else if(index != level){
- 		//printf("block was found! Spliting block and going down to level %d \n", index - 1);
  		split(flists[index]); 
  		find(index - 1, level);
  	}else{
  		struct head* blockToGive = flists[index];
+    blockToGive->status = Taken;
  		removeFromflists(index);
  		blockToGive->level = index;
  		return blockToGive;
@@ -167,20 +166,22 @@ void *balloc(size_t size) {
 
 
 void insert(struct head* block) {
-  appendToflists(block);
+  block->status = Free;
   if(block->level > 6){
-  	return;
+    appendToflists(block);
+    numberOfFreePages++;
+    //TODO: a page is totaly free and should be dropped here
   }else{
-  	if(flists[block->level]->next != NULL){
-  		struct head* currentBuddy =  buddy(block);
-  		struct head* coalescedBlock = merge(block,currentBuddy);
-  		coalescedBlock->level = block->level + 1;
-  		removeFromflists(coalescedBlock->level - 1);
-  		removeFromflists(coalescedBlock->level - 1);
-  		insert(coalescedBlock);
-  		return;
-  	}
-  	return;
+    struct head* testBuddy = buddy(block);
+    if((testBuddy->status == Free) && (block->level == testBuddy->level)){
+      struct head* coalescedBlock = primary(testBuddy);
+      removeFromflists(block->level);
+      removeFromflists(block->level);
+      coalescedBlock->level = block->level + 1;
+      insert(coalescedBlock);
+    }else{
+      appendToflists(block);
+    }
   }
   return;
 }
@@ -189,6 +190,7 @@ void bfree(void *memory) {
 	//printf("freeing block\n");
   if(memory != NULL) {
     struct head *block = magic(memory);
+    //printf("trying to free block %p at level = %d\n", block, block->level);
     insert(block);
   }else{
   	//printf("cant free an empty block, returning...\n");
@@ -204,24 +206,27 @@ int randr(unsigned int min, unsigned int max){
 // Test sequences
 void test(int numberOfBlocks, int maxBlockSize, int minBlockSize, int maximumPagesAllowed) { 
 	appendToflists(new());
-    clock_t start, end;
-    double cpu_time_used;
+  clock_t start, end;
+  double cpu_time_used;
 	srand(time(NULL));
 	start = clock();
   	for(int j = 0; j < numberOfBlocks; j++){
   		int *memory;
   		int size = randr(minBlockSize, maxBlockSize);
      	memory = balloc(size);
+      *memory = 20;
      	if(memory == NULL){
-      		fprintf(stderr, "malloc failed\n");
-        	return;
-      	}
-      	if(pagesAllocated >= maximumPagesAllowed){
+      	fprintf(stderr, "malloc failed\n");
+        return;
+      }
+      if(pagesAllocated >= maximumPagesAllowed){
   			bfree(memory);
   			pagesAllocated--;
   		}	
 	}
+  printf("Free complete\n");
+  printflists();
 	end = clock();
 	cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-	printf("%f\n",cpu_time_used );
+	printf("cpu time used = %f\n",cpu_time_used );
 }

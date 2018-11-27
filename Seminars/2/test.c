@@ -18,6 +18,7 @@ int main(){
   scanf("%d", &numberOfBlocks);
 
   int max;
+  printf("Please chooce as max > min and with a size between 1 and 4072\n");
   printf("Enter maximum block size:\n");
   scanf("%d", &max);
 
