@@ -6,16 +6,17 @@ int main(){
 
 	//TODO
 	/*
-	Add a min value of the requested blocks.
-
-	Add a number to decide how many pages the process sould be able to obtain at a given time.
-	meaning when the maximum amount of blocks obtained is reached the process will start to free memory.
+	Beter benchmarks?
 	*/
 
-  printf("Welcome to benchmark for a homemade malloc and free implementation\nEnter number of blocks to request:\n");
+  printf("Welcome to benchmark for a homemade malloc and free implementation\nEnter number of rounds to request:\n");
 
-  int numberOfBlocks;
-  scanf("%d", &numberOfBlocks);
+  int rounds;
+  scanf("%d", &rounds);
+
+  int loops;
+  printf("Enter maximum amount of pages allowed\n");
+  scanf("%d", &loops);
 
   int max;
   printf("Please chooce as max > min and with a size between 1 and 4072\n");
@@ -26,10 +27,6 @@ int main(){
   printf("Enter minimum block size:\n");
   scanf("%d", &min);
 
-  int pagesAllowed;
-  printf("Enter maximum amount of pages allowed\n");
-  scanf("%d", &pagesAllowed);
 
-
-  test(numberOfBlocks, max, min, pagesAllowed);
+  test(rounds,loops, max, min);
 }

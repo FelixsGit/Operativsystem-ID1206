@@ -12,6 +12,8 @@
 #define LEVELS 8   
 #define PAGE 4096
 
+#define BUFFER 1010000
+
 enum flag {Free, Taken};
 
 struct head {
@@ -21,36 +23,40 @@ struct head {
   struct head *prev;  
 };
 
-
 /* The free lists */
-struct head *flists[LEVELS] = {NULL};
+struct head* flists[LEVELS] = {NULL};
 int pagesAllocated = 0;
-int numberOfFreePages = 0;
+long int totalInternalFrag = 0;
+long int totalAmountAllocated = 0;
+long int totalMemoryGiven = 0;
 
 //This function appends a block to the flists structure
 void appendToflists(struct head* blockToAppend){
   blockToAppend->status = Free;
-	if(flists[blockToAppend->level] == NULL){
-		blockToAppend->prev = NULL;
-		blockToAppend->next = NULL;
-		flists[blockToAppend->level] = blockToAppend;
-	}else{
-		blockToAppend->next = flists[blockToAppend->level];
-		blockToAppend->next->prev = blockToAppend;
-		flists[blockToAppend->level] = blockToAppend;
-	}
+	blockToAppend->next = flists[blockToAppend->level];
+  blockToAppend->prev = NULL;
+  flists[blockToAppend->level] = blockToAppend;
+  if(blockToAppend->next != NULL){
+    blockToAppend->next->prev = blockToAppend;
+  }
 }
 
 //This function removes a block from the flists structure
-void removeFromflists(int level){
-	if(flists[level] == NULL){
-		return;
-	}else if(flists[level]->next != NULL){
-		flists[level]->next->prev = NULL;
-		flists[level] = flists[level]->next;
-	}else{
-		flists[level] = NULL;
-	}
+void removeFromflists(struct head* block){
+  //block->status = Taken;
+  if(block->next == NULL && block->prev == NULL){
+    flists[block->level] = NULL;
+  }else if(block->prev != NULL && block->next == NULL){
+    block->prev->next = NULL;
+  }else if(block->prev == NULL && block->next != NULL){
+    block->next->prev = block->prev;
+    flists[block->level] = block->next;
+  }else{
+    block->prev->next = block->next;
+    block->next->prev = block->prev;
+  }
+  block->next = NULL;
+  block->prev = NULL;
 }
 
 //This function prints the number of free block on each level in the flists structure
@@ -81,7 +87,8 @@ struct head *new() {
   assert(((long int)new & 0xfff) == 0);  // 12 last bits should be zero 
   new->level = LEVELS -1;
   new->status = Free;
-  pagesAllocated++;
+  //printf("Heap is pointing to %p\n", new);
+  totalMemoryGiven += PAGE;
   return new;
 }
 
@@ -98,6 +105,7 @@ struct head *primary(struct head* block) {
 }
 
 struct head *split(struct head *block) {
+  removeFromflists(block);
   block->status = Taken;
   int index = block->level - 1;
   int mask =  0x1 << (index + MIN);
@@ -105,9 +113,8 @@ struct head *split(struct head *block) {
   struct head* leftNewBlock = block;
   rightNewBlock->level = block->level - 1;
   leftNewBlock->level = block->level - 1;
-  removeFromflists(block->level + 1);
-  appendToflists(leftNewBlock);
   appendToflists(rightNewBlock);
+  appendToflists(leftNewBlock);
 }
 
 
@@ -130,34 +137,60 @@ int level(int req) {
   return i;
 }
 
+int getSizeFromLevel(int level){
+   if(level == 0){
+    return 32;
+  }else if(level == 1){
+    return 64;
+  }else if(level == 2){
+    return 128;
+  }else if(level == 3){
+    return 256;
+  }else if(level == 4){
+    return 512;
+  }else if(level == 5){
+    return 1024;
+  }else if(level == 6){
+    return 2048;
+  }else if(level == 7){
+    return 4096;
+  }
+}
 
-struct head *find(int index, short int level) {
+void updateCounters(int level, long int sizeOfBlockNeeded){
+  totalInternalFrag += (getSizeFromLevel(level) - sizeOfBlockNeeded);
+  totalAmountAllocated += getSizeFromLevel(level);
+}
+
+struct head *find(int index, short int level, int sizeOfBlockNeeded) {
  	if(flists[index] == NULL){
  		if(index > 6){
  			appendToflists(new());
- 			find(index, level);
+ 			find(index, level, sizeOfBlockNeeded);
  		}else{
- 			find(index+ 1, level);
+ 			find(index+ 1, level, sizeOfBlockNeeded);
  		}
  	}else if(index != level){
  		split(flists[index]); 
- 		find(index - 1, level);
+ 		find(index - 1, level, sizeOfBlockNeeded);
  	}else{
  		struct head* blockToGive = flists[index];
     blockToGive->status = Taken;
- 		removeFromflists(index);
- 		blockToGive->level = index;
+    blockToGive->level = index;
+ 		removeFromflists(blockToGive);
+    updateCounters(level, sizeOfBlockNeeded);
  		return blockToGive;
  	}
 }
 
 
 void *balloc(size_t size) {
-  if( size == 0 ){
+  if(size == 0){
     return NULL;
   }
   int index = level(size);
-  struct head *taken = find(index, index);
+  int totalsize = size + sizeof(struct head);
+  struct head *taken = find(index, index, totalsize);
   if(taken == NULL){
   	return NULL;
   }
@@ -168,15 +201,15 @@ void *balloc(size_t size) {
 void insert(struct head* block) {
   block->status = Free;
   if(block->level > 6){
+    block->status = Free;
     appendToflists(block);
-    numberOfFreePages++;
-    //TODO: a page is totaly free and should be dropped here
+    //printf("munmap active\n");
+    //munmap(block, PAGE);
   }else{
     struct head* testBuddy = buddy(block);
     if((testBuddy->status == Free) && (block->level == testBuddy->level)){
+      removeFromflists(testBuddy);
       struct head* coalescedBlock = primary(testBuddy);
-      removeFromflists(block->level);
-      removeFromflists(block->level);
       coalescedBlock->level = block->level + 1;
       insert(coalescedBlock);
     }else{
@@ -187,14 +220,24 @@ void insert(struct head* block) {
 }
 
 void bfree(void *memory) {
-	//printf("freeing block\n");
   if(memory != NULL) {
     struct head *block = magic(memory);
-    //printf("trying to free block %p at level = %d\n", block, block->level);
     insert(block);
   }else{
   	//printf("cant free an empty block, returning...\n");
   }
+}
+
+int getExternalFrag(){
+  int externalFrag = 0;
+  for(int i = 0; i < LEVELS - 1; i++){
+    struct head* freeBlock = flists[i];
+    while(freeBlock != NULL){
+      externalFrag += getSizeFromLevel(i);
+      freeBlock = freeBlock->next;
+    }
+  }
+  return externalFrag;
 }
 
 int randr(unsigned int min, unsigned int max){
@@ -204,29 +247,44 @@ int randr(unsigned int min, unsigned int max){
 }
 
 // Test sequences
-void test(int numberOfBlocks, int maxBlockSize, int minBlockSize, int maximumPagesAllowed) { 
-	appendToflists(new());
+void test(int rounds, int loops, int maxBlockSize, int minBlockSize) { 
+  void *buffer[BUFFER];
+  for(int i =0; i < BUFFER; i++) {
+    buffer[i] = NULL;
+  }
+
   clock_t start, end;
   double cpu_time_used;
-	srand(time(NULL));
-	start = clock();
-  	for(int j = 0; j < numberOfBlocks; j++){
-  		int *memory;
-  		int size = randr(minBlockSize, maxBlockSize);
-     	memory = balloc(size);
-      *memory = 20;
-     	if(memory == NULL){
-      	fprintf(stderr, "malloc failed\n");
+  srand(time(NULL));
+  start = clock();
+
+  for(int j = 0; j < rounds; j++) {
+    for(int i= 0; i < loops ; i++) {
+      int index = rand() % BUFFER;
+      if(buffer[index] != NULL) {
+        bfree(buffer[index]);
+      }
+      size_t size = (size_t)randr(minBlockSize,maxBlockSize);
+      int* memory; 
+      memory = balloc(size);
+
+      if(memory == NULL) {
+        memory = balloc(0); 
+        fprintf(stderr, "memory myllocation failed, last address %p\n", memory);
         return;
       }
-      if(pagesAllocated >= maximumPagesAllowed){
-  			bfree(memory);
-  			pagesAllocated--;
-  		}	
-	}
-  printf("Free complete\n");
+      buffer[index] = memory;
+      *memory = 122;/* writing to the memory so we know it exists */
+    }
+  }
+  end = clock();
+  cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+  printf("cpu time used = %f\n",cpu_time_used );
+
+  int extFrag = getExternalFrag();
+  long double procentIntFrag = (((long double)(totalInternalFrag)/((long double)totalAmountAllocated))*100);
+  long double procentExFrag = (((long double)(extFrag)/((long double)totalMemoryGiven))*100);
+  printf("total internal fragmentation is = %ld/%ld bytes, -> %Lf%% \n",totalInternalFrag, totalAmountAllocated, procentIntFrag);
+  printf("total external fragmentation is = %d/%ld bytes, -> %Lf%% \n",extFrag, totalMemoryGiven, procentExFrag);
   printflists();
-	end = clock();
-	cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-	printf("cpu time used = %f\n",cpu_time_used );
 }
