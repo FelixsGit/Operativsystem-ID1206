@@ -12,7 +12,8 @@
 #define LEVELS 8   
 #define PAGE 4096
 
-#define BUFFER 1010000
+#define BUFFER 1000
+#define LOOPS 100000
 
 enum flag {Free, Taken};
 
@@ -25,10 +26,9 @@ struct head {
 
 /* The free lists */
 struct head* flists[LEVELS] = {NULL};
-int pagesAllocated = 0;
-long int totalInternalFrag = 0;
-long int totalAmountAllocated = 0;
-long int totalMemoryGiven = 0;
+long int memoryAskedFor = 0;
+long int memoryGiven = 0;
+long int memoryAllocatedByOS = 0; 
 
 //This function appends a block to the flists structure
 void appendToflists(struct head* blockToAppend){
@@ -88,7 +88,7 @@ struct head *new() {
   new->level = LEVELS -1;
   new->status = Free;
   //printf("Heap is pointing to %p\n", new);
-  totalMemoryGiven += PAGE;
+  memoryAllocatedByOS += PAGE;
   return new;
 }
 
@@ -104,7 +104,7 @@ struct head *primary(struct head* block) {
   return (struct head*)((long int)block & mask);
 }
 
-struct head *split(struct head *block) {
+void *split(struct head *block) {
   removeFromflists(block);
   block->status = Taken;
   int index = block->level - 1;
@@ -158,8 +158,7 @@ int getSizeFromLevel(int level){
 }
 
 void updateCounters(int level, long int sizeOfBlockNeeded){
-  totalInternalFrag += (getSizeFromLevel(level) - sizeOfBlockNeeded);
-  totalAmountAllocated += getSizeFromLevel(level);
+  memoryGiven += getSizeFromLevel(level);
 }
 
 struct head *find(int index, short int level, int sizeOfBlockNeeded) {
@@ -190,6 +189,7 @@ void *balloc(size_t size) {
   }
   int index = level(size);
   int totalsize = size + sizeof(struct head);
+  memoryAskedFor += totalsize;
   struct head *taken = find(index, index, totalsize);
   if(taken == NULL){
   	return NULL;
@@ -201,10 +201,11 @@ void *balloc(size_t size) {
 void insert(struct head* block) {
   block->status = Free;
   if(block->level > 6){
-    block->status = Free;
-    appendToflists(block);
+    //block->status = Taken;
+    //appendToflists(block);
     //printf("munmap active\n");
-    //munmap(block, PAGE);
+    munmap(block, PAGE);
+    memoryAllocatedByOS = memoryAllocatedByOS - PAGE;
   }else{
     struct head* testBuddy = buddy(block);
     if((testBuddy->status == Free) && (block->level == testBuddy->level)){
@@ -246,45 +247,25 @@ int randr(unsigned int min, unsigned int max){
        return (max - min +1)*scaled + min;
 }
 
+void writeFrag(double time){
+ 
+  printf("%f\t%f\t%f\t%f\t\n",(double)time, (double)memoryAllocatedByOS/1000, (double)memoryGiven/1000, (double)memoryAskedFor/1000);
+
+}
+
+
 // Test sequences
-void test(int rounds, int loops, int maxBlockSize, int minBlockSize) { 
-  void *buffer[BUFFER];
-  for(int i =0; i < BUFFER; i++) {
-    buffer[i] = NULL;
-  }
-
-  clock_t start, end;
-  double cpu_time_used;
-  srand(time(NULL));
-  start = clock();
-
-  for(int j = 0; j < rounds; j++) {
-    for(int i= 0; i < loops ; i++) {
-      int index = rand() % BUFFER;
-      if(buffer[index] != NULL) {
-        bfree(buffer[index]);
-      }
-      size_t size = (size_t)randr(minBlockSize,maxBlockSize);
-      int* memory; 
-      memory = balloc(size);
-
-      if(memory == NULL) {
-        memory = balloc(0); 
-        fprintf(stderr, "memory myllocation failed, last address %p\n", memory);
-        return;
-      }
-      buffer[index] = memory;
-      *memory = 122;/* writing to the memory so we know it exists */
-    }
-  }
-  end = clock();
-  cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-  printf("cpu time used = %f\n",cpu_time_used );
-
+void test() { 
+  
+  /*
   int extFrag = getExternalFrag();
-  long double procentIntFrag = (((long double)(totalInternalFrag)/((long double)totalAmountAllocated))*100);
+  long double procentIntFrag = (((long double)(memoryAskedFor)/((long double)totalAmountAllocated))*100);
   long double procentExFrag = (((long double)(extFrag)/((long double)totalMemoryGiven))*100);
-  printf("total internal fragmentation is = %ld/%ld bytes, -> %Lf%% \n",totalInternalFrag, totalAmountAllocated, procentIntFrag);
+  printf("total internal fragmentation is = %ld/%ld bytes, -> %Lf%% \n",memoryAskedFor, totalAmountAllocated, procentIntFrag);
   printf("total external fragmentation is = %d/%ld bytes, -> %Lf%% \n",extFrag, totalMemoryGiven, procentExFrag);
   printflists();
+  */
+  
+  
+  return;
 }
