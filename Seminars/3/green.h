@@ -1,8 +1,5 @@
 #include <ucontext.h>
 
-#define ON 1
-#define OFF 0
-
 typedef struct green_t {
 	ucontext_t *context;
 	void *(*fun)(void*);
@@ -12,6 +9,14 @@ typedef struct green_t {
 	int zombie;
 }green_t;
 
+typedef struct green_cond_t{
+	green_t *suspendedThreads;
+}green_cond_t;
+
 int green_create(green_t *thread, void *(*fun)(void*), void *arg);
 int green_yield();
 int green_join(green_t *thread);
+
+void green_cond_signal(green_cond_t*);
+void green_cond_init(green_cond_t*);
+void green_cond_wait(green_cond_t*);
