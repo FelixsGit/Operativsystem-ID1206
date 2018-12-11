@@ -28,4 +28,5 @@ int green_join(green_t *thread);
 
 void green_cond_signal(green_cond_t*);
 void green_cond_init(green_cond_t*);
-void green_cond_wait(green_cond_t*);
+//void green_cond_wait(green_cond_t*);
+int green_cond_wait(green_cond_t*, green_mutex_t*);

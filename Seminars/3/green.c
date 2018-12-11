@@ -192,6 +192,7 @@ void green_cond_init(struct green_cond_t *cond){
 	cond->suspendedThreads = NULL;
 }
 
+/*
 void green_cond_wait(struct green_cond_t *cond){
 	sigprocmask(SIG_BLOCK, &block, NULL);
 	addToQueue(&(cond->suspendedThreads), running);
@@ -199,6 +200,39 @@ void green_cond_wait(struct green_cond_t *cond){
 	tellNextToRun();
 	swapcontext(susp->context, running->context);
 	sigprocmask(SIG_UNBLOCK, &block, NULL);
+}
+*/
+int green_cond_wait(struct green_cond_t *cond, green_mutex_t *mutex){
+	sigprocmask(SIG_BLOCK, &block, NULL);
+	//suspend the running thread on condition
+	green_t *susp = running;
+	addToQueue(&(cond->suspendedThreads), susp);
+	if(mutex != NULL){
+		//release the lock if we have a mutex
+		mutex->taken = FALSE;
+
+		//schedule suspended threads
+		addToReadyQueue(mutex->susp);
+		mutex->susp = NULL;
+	}
+	//schedule the next thread
+	tellNextToRun();
+	swapcontext(susp->context, running->context);
+	if(mutex != NULL){
+		//try to take the lock
+		while(mutex->taken){
+			//bad luck, suspend the thread;
+			green_t *susp = running;
+			addToQueue(&(mutex->susp), susp);
+			tellNextToRun();
+			swapcontext(susp->context, running->context);
+		}
+		//take the lock
+		mutex->taken = TRUE;
+	}
+	//unblock
+	sigprocmask(SIG_UNBLOCK, &block, NULL);
+	return 0;
 }
 
 void green_cond_signal(struct green_cond_t *cond){
